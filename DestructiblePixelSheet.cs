@@ -107,6 +107,9 @@ public partial class DestructiblePixelSheet : Sprite2D
 	[Signal]
 	public delegate void ShapeDamageStatsChangedEventHandler(Godot.Collections.Dictionary damagePercentByShapeKey);
 
+	[Signal]
+	public delegate void WaveClickModeChangedEventHandler(bool waveClickMode);
+
 	public static int EncodeShapeGlobalKey(int layer, int localComponentId)
 	{
 		return layer * ShapeKeyLayerStride + localComponentId;
@@ -292,6 +295,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 			if (!popped)
 			{
 				WaveClickMode = !WaveClickMode;
+				EmitSignal(SignalName.WaveClickModeChanged, WaveClickMode);
 			}
 
 			FlushTextureIfDirty();

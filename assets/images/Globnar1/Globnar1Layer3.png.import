@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cpvehcvgw4my6"
-path="res://.godot/imported/Globnar1Layer3.png-7eb38754ce2cc62daec65082daee86a5.ctex"
+path="res://.godot/imported/Globnar1Layer3.png-539195c32f9b1694df05f7ab35a0322a.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/images/Globnar1/Globnar1Layer3.png"
-dest_files=["res://.godot/imported/Globnar1Layer3.png-7eb38754ce2cc62daec65082daee86a5.ctex"]
+source_file="res://assets/images/globnar1/Globnar1Layer3.png"
+dest_files=["res://.godot/imported/Globnar1Layer3.png-539195c32f9b1694df05f7ab35a0322a.ctex"]
 
 [params]
 

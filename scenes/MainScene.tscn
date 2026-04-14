@@ -2,14 +2,17 @@
 
 [ext_resource type="Script" uid="uid://kif4wa6ydaqw" path="res://scenes/MainSceneController.cs" id="1_main"]
 [ext_resource type="PackedScene" uid="uid://bxwwyt704tk1i" path="res://destructible_pixel_sheet.tscn" id="2_sheet"]
-[ext_resource type="Texture2D" uid="uid://bawnm0ttrdh58" path="res://assets/images/Globnar1/Globnar1Layer1clear.png" id="3_cfq0f"]
-[ext_resource type="Texture2D" uid="uid://c57ds3w520qun" path="res://assets/images/Globnar1/Globnar1Layer2eyes-clear.png" id="4_pjux3"]
-[ext_resource type="Texture2D" uid="uid://c837qheym24rl" path="res://assets/images/Globnar1/Globnar1Layer3clear.png" id="5_o3jky"]
-[ext_resource type="Texture2D" uid="uid://cjnkxb6p7plva" path="res://assets/images/Globnar1/Globnar1Layer4.png" id="6_o3jky"]
+[ext_resource type="Texture2D" uid="uid://bawnm0ttrdh58" path="res://assets/images/globnar1/Globnar1Layer1clear.png" id="3_cfq0f"]
+[ext_resource type="Texture2D" uid="uid://c57ds3w520qun" path="res://assets/images/globnar1/Globnar1Layer2eyes-clear.png" id="4_pjux3"]
+[ext_resource type="Texture2D" uid="uid://c837qheym24rl" path="res://assets/images/globnar1/Globnar1Layer3clear.png" id="5_o3jky"]
+[ext_resource type="Texture2D" uid="uid://cjnkxb6p7plva" path="res://assets/images/globnar1/Globnar1Layer4.png" id="6_o3jky"]
 [ext_resource type="PackedScene" path="res://scenes/ScoreUi.tscn" id="7_score_ui"]
-[ext_resource type="Texture2D" uid="uid://deuam4xam6cgc" path="res://assets/images/Globnar1/Globnar1Shape1+4.png" id="7_x537r"]
-[ext_resource type="Texture2D" uid="uid://die5rpgqjkghn" path="res://assets/images/Globnar1/Globnar1Shape3.png" id="8_cfq0f"]
-[ext_resource type="Texture2D" uid="uid://bps0unmav3ycj" path="res://assets/images/Globnar1/Globnar1Shape2.png" id="8_pjux3"]
+[ext_resource type="Texture2D" uid="uid://deuam4xam6cgc" path="res://assets/images/globnar1/Globnar1Shape1+4.png" id="7_x537r"]
+[ext_resource type="Texture2D" uid="uid://die5rpgqjkghn" path="res://assets/images/globnar1/Globnar1Shape3.png" id="8_cfq0f"]
+[ext_resource type="Texture2D" uid="uid://bps0unmav3ycj" path="res://assets/images/globnar1/Globnar1Shape2.png" id="8_pjux3"]
+[ext_resource type="PackedScene" uid="uid://bqx7n2k8m0d4p" path="res://scenes/ClickModeIndicator.tscn" id="9_mode_ui"]
+[ext_resource type="Texture2D" uid="uid://88hlj75my2lw" path="res://assets/images/icons/slice.png" id="12_kp0ql"]
+[ext_resource type="Texture2D" uid="uid://0ymnach6iw5r" path="res://assets/images/icons/hammer.png" id="13_08o8g"]
 
 [node name="MainScene" type="Node2D" unique_id=19574204]
 script = ExtResource("1_main")
@@ -37,3 +40,7 @@ DragVelocityReference = 1000.0
 DragVelocityMaxScale = 1000.0
 
 [node name="ScoreUi" parent="." unique_id=2124478041 instance=ExtResource("7_score_ui")]
+
+[node name="ClickModeIndicator" parent="." unique_id=1460547512 instance=ExtResource("9_mode_ui")]
+BrushModeTexture = ExtResource("12_kp0ql")
+WaveModeTexture = ExtResource("13_08o8g")
