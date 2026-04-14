@@ -186,22 +186,28 @@ public partial class MainSceneController : Node2D
 			_scoreByShapeKey[key] = prev + pts;
 		}
 
-		EmitSignal(SignalName.ScoreChanged, ToVariantDict(_scoreByShapeKey), _damagePercentByShapeKey, _sheet.GetShapeIslandGlobalKeysSorted());
+		EmitSignal(SignalName.ScoreChanged, BuildHarvestScorePercentByShapeKey(), _damagePercentByShapeKey, _sheet.GetShapeIslandGlobalKeysSorted());
 		GD.Print($"Harvest +{totalPoints}");
 	}
 
 	private void OnShapeDamageStatsChanged(Godot.Collections.Dictionary damagePercentByShapeKey)
 	{
 		_damagePercentByShapeKey = damagePercentByShapeKey;
-		EmitSignal(SignalName.ScoreChanged, ToVariantDict(_scoreByShapeKey), _damagePercentByShapeKey, _sheet.GetShapeIslandGlobalKeysSorted());
+		EmitSignal(SignalName.ScoreChanged, BuildHarvestScorePercentByShapeKey(), _damagePercentByShapeKey, _sheet.GetShapeIslandGlobalKeysSorted());
 	}
 
-	private static Godot.Collections.Dictionary ToVariantDict(Dictionary<int, int> source)
+	private Godot.Collections.Dictionary BuildHarvestScorePercentByShapeKey()
 	{
 		var gd = new Godot.Collections.Dictionary();
-		foreach (var kv in source)
+		foreach (Variant vk in _sheet.GetShapeIslandGlobalKeysSorted())
 		{
-			gd[kv.Key] = kv.Value;
+			var key = vk.AsInt32();
+			_scoreByShapeKey.TryGetValue(key, out var cumulative);
+			var maxV = _sheet.GetShapeInitialMaxIntegrity(key);
+			var pct = maxV <= 0
+				? 0f
+				: Mathf.Clamp(100f * cumulative / maxV, 0f, 100f);
+			gd[key] = pct;
 		}
 
 		return gd;

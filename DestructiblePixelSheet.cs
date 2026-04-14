@@ -2,6 +2,7 @@ using Godot;
 using System.Collections.Generic;
 
 // Per-cell integrity 0–100 across stacked z-layers. Lower layers are damaged only after upper layers at that pixel are depleted.
+// Visual: all layers with integrity are alpha-composited (back to front); gameplay uses the same integrity data as before.
 // Normal mode: disk brush + drag (DPS and brush radius scale with cursor px/s). Wave mode: Gaussian radial wave.
 public partial class DestructiblePixelSheet : Sprite2D
 {
@@ -46,6 +47,28 @@ public partial class DestructiblePixelSheet : Sprite2D
 	[Export]
 	public Texture2D[] LayerShapeMasks { get; set; } = new Texture2D[0];
 
+	// Display names per layer: each entry is a PackedStringArray (or string array) — index 0 = local shape id 1, etc. (UI only.)
+	[Export]
+	public Godot.Collections.Array LayerShapeDisplayNames { get; set; } = new Godot.Collections.Array();
+
+	// RGB brightness at 0 integrity (1 = no darkening, 0 = black). Render only.
+	[Export(PropertyHint.Range, "0,1,0.01")]
+	public float IntegrityVisualDarkenMin { get; set; } = 0.38f;
+
+	// Per-layer visual transparency (0 = opaque, 1 = fully transparent). Render only; does not change integrity or scoring.
+	private float[] _layerVisualTransparency = System.Array.Empty<float>();
+
+	[Export]
+	public float[] LayerVisualTransparency
+	{
+		get => _layerVisualTransparency;
+		set
+		{
+			_layerVisualTransparency = value ?? System.Array.Empty<float>();
+			RequestRebuildForVisualTransparency();
+		}
+	}
+
 	// Viewport px/s: drag DPS uses 1× scale here; brush radius lerps linearly from DamageRadius down to 1 here.
 	[Export]
 	public float DragVelocityReference { get; set; } = 400f;
@@ -87,6 +110,49 @@ public partial class DestructiblePixelSheet : Sprite2D
 	public static int EncodeShapeGlobalKey(int layer, int localComponentId)
 	{
 		return layer * ShapeKeyLayerStride + localComponentId;
+	}
+
+	/// <summary>Human-readable name for a shape global key, or fallback "L{layer} shape {id}".</summary>
+	public string GetShapeDisplayName(int globalShapeKey)
+	{
+		var layer = globalShapeKey / ShapeKeyLayerStride;
+		var localId = globalShapeKey % ShapeKeyLayerStride;
+		if (localId <= 0 || (uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return $"Shape {globalShapeKey}";
+		}
+
+		var index = localId - 1;
+		if (LayerShapeDisplayNames == null || layer < 0 || layer >= LayerShapeDisplayNames.Count)
+		{
+			return ShapeNameFallback(layer, localId);
+		}
+
+		var inner = LayerShapeDisplayNames[layer];
+		string? n = null;
+		if (inner.VariantType == Variant.Type.PackedStringArray)
+		{
+			var strings = inner.AsStringArray();
+			if (strings != null && index >= 0 && index < strings.Length)
+			{
+				n = strings[index];
+			}
+		}
+		else if (inner.VariantType == Variant.Type.Array)
+		{
+			var arr = inner.AsGodotArray<Variant>();
+			if (index >= 0 && index < arr.Count)
+			{
+				n = arr[index].AsString();
+			}
+		}
+
+		return string.IsNullOrWhiteSpace(n) ? ShapeNameFallback(layer, localId) : n!;
+	}
+
+	private static string ShapeNameFallback(int layer, int localId)
+	{
+		return $"Layer {layer} Shape {localId}";
 	}
 
 	public override void _Ready()
@@ -1026,6 +1092,12 @@ public partial class DestructiblePixelSheet : Sprite2D
 		EmitSignal(SignalName.ShapeDamageStatsChanged, BuildDamagePercentByShapeKey());
 	}
 
+	/// <summary>Initial max integrity for the shape (sum of layer max health over masked cells). Zero if unknown.</summary>
+	public int GetShapeInitialMaxIntegrity(int globalShapeKey)
+	{
+		return _shapeMaxIntegrityByKey.TryGetValue(globalShapeKey, out var v) ? v : 0;
+	}
+
 	/// <summary>All mask-defined shape islands (global keys), sorted for stable UI row order.</summary>
 	public Godot.Collections.Array GetShapeIslandGlobalKeysSorted()
 	{
@@ -1114,24 +1186,6 @@ public partial class DestructiblePixelSheet : Sprite2D
 		_integrity[LayeredIndex(x, y, layer)] = Mathf.Clamp(value, IntegrityMin, GetLayerMaxHealth(layer));
 	}
 
-	private bool TryGetVisibleLayer(int x, int y, out int layer, out int integrity)
-	{
-		for (var i = 0; i < _resolvedLayerCount; i++)
-		{
-			var v = GetLayerIntegrity(x, y, i);
-			if (v > IntegrityMin)
-			{
-				layer = i;
-				integrity = v;
-				return true;
-			}
-		}
-
-		layer = -1;
-		integrity = IntegrityMin;
-		return false;
-	}
-
 	private bool TryGetTopNonZeroLayer(int x, int y, out int layer)
 	{
 		for (var i = 0; i < _resolvedLayerCount; i++)
@@ -1154,15 +1208,77 @@ public partial class DestructiblePixelSheet : Sprite2D
 			return;
 		}
 
-		if (!TryGetVisibleLayer(x, y, out var layer, out var integrity))
+		// Composite all layers that still have integrity: back (highest index) to front (layer 0).
+		// Premultiplied alpha accumulation: dst = src_p + dst * (1 - src_a).
+		float pr = 0f;
+		float pg = 0f;
+		float pb = 0f;
+		float pa = 0f;
+
+		for (var li = _resolvedLayerCount - 1; li >= 0; li--)
+		{
+			var v = GetLayerIntegrity(x, y, li);
+			if (v <= IntegrityMin)
+			{
+				continue;
+			}
+
+			var c = GetLayerBaseColor(x, y, li);
+			var intFrac = Mathf.Clamp(v, IntegrityMin, GetLayerMaxHealth(li)) / (float)GetLayerMaxHealth(li);
+			var rgbDarken = Mathf.Lerp(Mathf.Clamp(IntegrityVisualDarkenMin, 0f, 1f), 1f, intFrac);
+			var straightA = c.A * intFrac * GetLayerVisualOpaqueFactor(li);
+			straightA = Mathf.Clamp(straightA, 0f, 1f);
+			if (straightA <= 1e-6f)
+			{
+				continue;
+			}
+
+			var sr = c.R * rgbDarken * straightA;
+			var sg = c.G * rgbDarken * straightA;
+			var sb = c.B * rgbDarken * straightA;
+			var oneMinus = 1f - straightA;
+			pr = sr + pr * oneMinus;
+			pg = sg + pg * oneMinus;
+			pb = sb + pb * oneMinus;
+			pa = straightA + pa * oneMinus;
+		}
+
+		if (pa <= 1e-6f)
 		{
 			_image.SetPixel(x, y, Colors.Transparent);
 			return;
 		}
 
-		var c = GetLayerBaseColor(x, y, layer);
-		c.A *= Mathf.Clamp(integrity, IntegrityMin, GetLayerMaxHealth(layer)) / (float)GetLayerMaxHealth(layer);
-		_image.SetPixel(x, y, c);
+		_image.SetPixel(x, y, new Color(pr / pa, pg / pa, pb / pa, pa));
+	}
+
+	/// <summary>Multiplier applied to alpha after integrity fade: 1 - transparency.</summary>
+	private float GetLayerVisualOpaqueFactor(int layer)
+	{
+		if ((uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return 1f;
+		}
+
+		if (layer >= _layerVisualTransparency.Length)
+		{
+			return 1f;
+		}
+
+		var t = Mathf.Clamp(_layerVisualTransparency[layer], 0f, 1f);
+		return 1f - t;
+	}
+
+	private void RequestRebuildForVisualTransparency()
+	{
+		if (_image is null)
+		{
+			return;
+		}
+
+		RebuildImageFromIntegrity();
+		_textureDirty = true;
+		FlushTextureIfDirty();
 	}
 
 	private void RebuildImageFromIntegrity()

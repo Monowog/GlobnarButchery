@@ -8,15 +8,20 @@ public partial class ScoreUi : CanvasLayer
 	public NodePath ControllerPath { get; set; } = new("..");
 
 	[Export]
+	public NodePath SheetPath { get; set; } = new("../DestructiblePixelSheet");
+
+	[Export]
 	public NodePath RowsHostPath { get; set; } = new("MarginContainer/ScrollContainer/RowsHost");
 
 	private MainSceneController _controller = null!;
+	private DestructiblePixelSheet _sheet = null!;
 	private VBoxContainer _rowsHost = null!;
 
 	public override void _Ready()
 	{
 		_rowsHost = GetNode<VBoxContainer>(RowsHostPath);
 		_controller = GetNode<MainSceneController>(ControllerPath);
+		_sheet = GetNode<DestructiblePixelSheet>(SheetPath);
 		_controller.ScoreChanged += OnScoreChanged;
 	}
 
@@ -38,17 +43,20 @@ public partial class ScoreUi : CanvasLayer
 		foreach (Variant vk in shapeIslandKeysSorted)
 		{
 			var key = vk.AsInt32();
-			var layer = key / DestructiblePixelSheet.ShapeKeyLayerStride;
-			var localId = key % DestructiblePixelSheet.ShapeKeyLayerStride;
-			var score = scoreByShapeKey.ContainsKey(key) ? scoreByShapeKey[key].AsInt32() : 0;
+			var score = scoreByShapeKey.ContainsKey(key) ? scoreByShapeKey[key].AsSingle() : 0f;
+			if (!Mathf.IsFinite(score))
+			{
+				score = 0f;
+			}
+
 			var dmg = damagePercentByShapeKey.ContainsKey(key) ? damagePercentByShapeKey[key].AsSingle() : 0f;
 
 			var row = new HBoxContainer();
 			row.AddThemeConstantOverride("separation", 12);
 			var nameLabel = new Label();
-			nameLabel.Text = $"L{layer} shape {localId}";
+			nameLabel.Text = _sheet.GetShapeDisplayName(key);
 			var scoreLabel = new Label();
-			scoreLabel.Text = $"Score: {score}";
+			scoreLabel.Text = $"Score: {score:F1}%";
 			var dmgLabel = new Label();
 			dmgLabel.Text = $"Damage: {dmg:0.0}%";
 			row.AddChild(nameLabel);
