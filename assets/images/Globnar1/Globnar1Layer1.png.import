@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dohs4drhrpqcl"
-path="res://.godot/imported/GlobnarLayer4.png-914e810a9f2b649990dcd463da04597c.ctex"
+uid="uid://b2nopyni26q8v"
+path="res://.godot/imported/Globnar1Layer1.png-5cc54df45bd1ba89a51421ff2895ac67.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/images/GlobnarLayer4.png"
-dest_files=["res://.godot/imported/GlobnarLayer4.png-914e810a9f2b649990dcd463da04597c.ctex"]
+source_file="res://assets/images/Globnar1/Globnar1Layer1.png"
+dest_files=["res://.godot/imported/Globnar1Layer1.png-5cc54df45bd1ba89a51421ff2895ac67.ctex"]
 
 [params]
 

@@ -42,6 +42,10 @@ public partial class DestructiblePixelSheet : Sprite2D
 	[Export]
 	public Texture2D[] LayerTextures { get; set; } = new Texture2D[0];
 
+	// Optional per-layer bitmap masks: red channel > 0.5 marks shape pixels used for harvest scoring.
+	[Export]
+	public Texture2D[] LayerShapeMasks { get; set; } = new Texture2D[0];
+
 	// Viewport px/s: drag DPS uses 1× scale here; brush radius lerps linearly from DamageRadius down to 1 here.
 	[Export]
 	public float DragVelocityReference { get; set; } = 400f;
@@ -54,6 +58,12 @@ public partial class DestructiblePixelSheet : Sprite2D
 	private int[] _integrity = null!;
 	private int[] _layerMaxHealth = null!;
 	private Color[] _layerBaseColors = null!;
+	private bool[] _shapeMaskMembership = null!;
+	// Per-pixel local connected-component id within layer (0 = non-shape); see EncodeShapeGlobalKey.
+	private int[] _shapeIslandLocalId = null!;
+	private readonly Dictionary<int, int> _shapeMaxIntegrityByKey = new();
+	private readonly Dictionary<int, int> _shapeDamageLostByKey = new();
+	public const int ShapeKeyLayerStride = 100000;
 	private int _resolvedLayerCount;
 	private Vector2I? _lastHeldCell;
 	private bool _textureDirty;
@@ -67,6 +77,17 @@ public partial class DestructiblePixelSheet : Sprite2D
 	private bool _waveRunning;
 	private Vector2I _waveOrigin;
 	private float _waveOuter = -1f;
+
+	[Signal]
+	public delegate void PointsAwardedEventHandler(int totalPoints, Godot.Collections.Array blobPayloads);
+
+	[Signal]
+	public delegate void ShapeDamageStatsChangedEventHandler(Godot.Collections.Dictionary damagePercentByShapeKey);
+
+	public static int EncodeShapeGlobalKey(int layer, int localComponentId)
+	{
+		return layer * ShapeKeyLayerStride + localComponentId;
+	}
 
 	public override void _Ready()
 	{
@@ -95,6 +116,9 @@ public partial class DestructiblePixelSheet : Sprite2D
 			}
 		}
 		BuildLayerRasterColors();
+		BuildShapeMaskMembership();
+		RecomputeShapeMaxIntegrity();
+		EmitShapeDamageStatsChanged();
 
 		_image = Image.CreateEmpty(SheetSize.X, SheetSize.Y, false, Image.Format.Rgba8);
 		RebuildImageFromIntegrity();
@@ -284,6 +308,78 @@ public partial class DestructiblePixelSheet : Sprite2D
 			return false;
 		}
 
+		var nonShapeIntegrityTotal = 0;
+		foreach (var p in islandCells)
+		{
+			var integrity = GetLayerIntegrity(p.X, p.Y, layer);
+			if (integrity <= IntegrityMin)
+			{
+				continue;
+			}
+
+			if (!IsShapeCell(p.X, p.Y, layer))
+			{
+				nonShapeIntegrityTotal += integrity;
+			}
+		}
+
+		var subIslands = FindShapeSubIslands(islandCells, layer);
+		var shapeIntTotal = 0;
+		foreach (var blob in subIslands)
+		{
+			foreach (var p in blob)
+			{
+				shapeIntTotal += GetLayerIntegrity(p.X, p.Y, layer);
+			}
+		}
+
+		var denom = Mathf.Max(1, shapeIntTotal);
+		var mergedByKey = new Dictionary<int, int>();
+		foreach (var blob in subIslands)
+		{
+			var shapeIntB = 0;
+			foreach (var p in blob)
+			{
+				shapeIntB += GetLayerIntegrity(p.X, p.Y, layer);
+			}
+
+			var pointsB = Mathf.Max(0, shapeIntB - nonShapeIntegrityTotal * shapeIntB / denom);
+			if (pointsB <= 0)
+			{
+				continue;
+			}
+
+			var first = blob[0];
+			var localId = _shapeIslandLocalId[LayeredIndex(first.X, first.Y, layer)];
+			if (localId <= 0)
+			{
+				continue;
+			}
+
+			var shapeKey = EncodeShapeGlobalKey(layer, localId);
+			mergedByKey.TryGetValue(shapeKey, out var prev);
+			mergedByKey[shapeKey] = prev + pointsB;
+		}
+
+		var payloads = new Godot.Collections.Array();
+		var totalAwarded = 0;
+		foreach (var kv in mergedByKey)
+		{
+			var pts = kv.Value;
+			totalAwarded += pts;
+			var d = new Godot.Collections.Dictionary
+			{
+				["ShapeKey"] = kv.Key,
+				["Points"] = pts,
+			};
+			payloads.Add(d);
+		}
+
+		if (totalAwarded > 0 && payloads.Count > 0)
+		{
+			EmitSignal(SignalName.PointsAwarded, totalAwarded, payloads);
+		}
+
 		foreach (var p in islandCells)
 		{
 			SetLayerIntegrity(p.X, p.Y, layer, IntegrityMin);
@@ -296,6 +392,67 @@ public partial class DestructiblePixelSheet : Sprite2D
 		}
 
 		return true;
+	}
+
+	private List<List<Vector2I>> FindShapeSubIslands(List<Vector2I> islandCells, int layer)
+	{
+		var width = SheetSize.X;
+		var height = SheetSize.Y;
+		var inIsland = new bool[width * height];
+		foreach (var p in islandCells)
+		{
+			inIsland[p.Y * width + p.X] = true;
+		}
+
+		var visited = new bool[width * height];
+		var result = new List<List<Vector2I>>();
+		foreach (var start in islandCells)
+		{
+			var si = start.Y * width + start.X;
+			if (visited[si])
+			{
+				continue;
+			}
+
+			if (!IsShapeCell(start.X, start.Y, layer) || GetLayerIntegrity(start.X, start.Y, layer) <= IntegrityMin)
+			{
+				continue;
+			}
+
+			var blob = new List<Vector2I>();
+			var stack = new Stack<Vector2I>();
+			stack.Push(start);
+			while (stack.Count > 0)
+			{
+				var c = stack.Pop();
+				var vi = c.Y * width + c.X;
+				if (visited[vi] || !inIsland[vi])
+				{
+					continue;
+				}
+
+				if (!IsShapeCell(c.X, c.Y, layer) || GetLayerIntegrity(c.X, c.Y, layer) <= IntegrityMin)
+				{
+					continue;
+				}
+
+				visited[vi] = true;
+				blob.Add(c);
+				var x = c.X;
+				var y = c.Y;
+				stack.Push(new Vector2I(x, y - 1));
+				stack.Push(new Vector2I(x - 1, y));
+				stack.Push(new Vector2I(x + 1, y));
+				stack.Push(new Vector2I(x, y + 1));
+			}
+
+			if (blob.Count > 0)
+			{
+				result.Add(blob);
+			}
+		}
+
+		return result;
 	}
 
 	private void AnalyzeIsland(int startX, int startY, int layer, out List<Vector2I> islandCells, out List<Vector2I> borderZeroCells, out bool touchesEdge)
@@ -421,7 +578,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 		_hoverActive = true;
 		foreach (var p in _hoverBorderPixels)
 		{
-			_image.SetPixel(p.X, p.Y, Colors.Blue);
+			_image.SetPixel(p.X, p.Y, BorderTouchesShapePixel(p.X, p.Y, layer) ? Colors.Green : Colors.Blue);
 		}
 
 		_textureDirty = true;
@@ -537,7 +694,10 @@ public partial class DestructiblePixelSheet : Sprite2D
 		var y0 = Mathf.Max(0, cy - ext);
 		var y1 = Mathf.Min(SheetSize.Y - 1, cy + ext);
 
-		var n = 0;
+		// Gaussian drill falloff within the disk: peak at center, softer at edge.
+		var sigma = Mathf.Max(1e-4f, r / 3f);
+		var twoSigmaSq = 2f * sigma * sigma;
+		var weightSum = 0f;
 		for (var y = y0; y <= y1; y++)
 		{
 			for (var x = x0; x <= x1; x++)
@@ -547,17 +707,16 @@ public partial class DestructiblePixelSheet : Sprite2D
 				var d2 = dx * (float)dx + dy * (float)dy;
 				if (d2 <= r2)
 				{
-					n++;
+					weightSum += Mathf.Exp(-d2 / twoSigmaSq);
 				}
 			}
 		}
 
-		if (n <= 0)
+		if (weightSum <= 1e-6f)
 		{
 			return;
 		}
 
-		var perCell = totalAmount / n;
 		for (var y = y0; y <= y1; y++)
 		{
 			for (var x = x0; x <= x1; x++)
@@ -567,7 +726,8 @@ public partial class DestructiblePixelSheet : Sprite2D
 				var d2 = dx * (float)dx + dy * (float)dy;
 				if (d2 <= r2)
 				{
-					ApplyDamage(x, y, perCell);
+					var w = Mathf.Exp(-d2 / twoSigmaSq);
+					ApplyDamage(x, y, totalAmount * (w / weightSum));
 				}
 			}
 		}
@@ -591,6 +751,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 			return;
 		}
 
+		var damageChanged = false;
 		var remaining = amount;
 		var changed = false;
 		for (var layer = 0; layer < _resolvedLayerCount && remaining > 0f; layer++)
@@ -609,7 +770,20 @@ public partial class DestructiblePixelSheet : Sprite2D
 			}
 
 			SetLayerIntegrity(x, y, layer, next);
-			remaining -= current - next;
+			var integrityLost = current - next;
+			remaining -= integrityLost;
+			if (integrityLost > 0 && IsShapeCell(x, y, layer))
+			{
+				var localId = _shapeIslandLocalId[LayeredIndex(x, y, layer)];
+				if (localId > 0)
+				{
+					var gk = EncodeShapeGlobalKey(layer, localId);
+					_shapeDamageLostByKey.TryGetValue(gk, out var prevLost);
+					_shapeDamageLostByKey[gk] = prevLost + integrityLost;
+					damageChanged = true;
+				}
+			}
+
 			changed = true;
 		}
 
@@ -620,6 +794,10 @@ public partial class DestructiblePixelSheet : Sprite2D
 
 		SyncPixel(x, y);
 		_textureDirty = true;
+		if (damageChanged)
+		{
+			EmitShapeDamageStatsChanged();
+		}
 	}
 
 	private static int FillBresenhamInclusive(Vector2I from, Vector2I to, Span<Vector2I> dest)
@@ -684,9 +862,10 @@ public partial class DestructiblePixelSheet : Sprite2D
 				continue;
 			}
 
-			var img = tex.GetImage();
+			var img = CreateSizedImageCopy(tex);
 			if (img is null)
 			{
+				GD.PushWarning($"{nameof(DestructiblePixelSheet)}: Layer texture image unreadable at layer {layer}; using fallback color.");
 				for (var i = 0; i < stride; i++)
 				{
 					_layerBaseColors[layer * stride + i] = fallback;
@@ -695,7 +874,6 @@ public partial class DestructiblePixelSheet : Sprite2D
 				continue;
 			}
 
-			img.Resize(SheetSize.X, SheetSize.Y, Image.Interpolation.Nearest);
 			for (var y = 0; y < SheetSize.Y; y++)
 			{
 				for (var x = 0; x < SheetSize.X; x++)
@@ -706,10 +884,194 @@ public partial class DestructiblePixelSheet : Sprite2D
 		}
 	}
 
+	private void BuildShapeMaskMembership()
+	{
+		var stride = SheetSize.X * SheetSize.Y;
+		var w = SheetSize.X;
+		var h = SheetSize.Y;
+		_shapeMaskMembership = new bool[stride * _resolvedLayerCount];
+		_shapeIslandLocalId = new int[stride * _resolvedLayerCount];
+
+		for (var layer = 0; layer < _resolvedLayerCount; layer++)
+		{
+			var tex = layer < LayerShapeMasks.Length ? LayerShapeMasks[layer] : null;
+			if (tex is null)
+			{
+				continue;
+			}
+
+			var img = CreateSizedImageCopy(tex);
+			if (img is null)
+			{
+				GD.PushWarning($"{nameof(DestructiblePixelSheet)}: Shape mask image unreadable at layer {layer}; defaulting to non-shape.");
+				continue;
+			}
+
+			var baseIndex = layer * stride;
+			for (var y = 0; y < h; y++)
+			{
+				for (var x = 0; x < w; x++)
+				{
+					var c = img.GetPixel(x, y);
+					var isShape = c.R > 0.5f;
+					var idx = y * w + x;
+					_shapeMaskMembership[baseIndex + idx] = isShape;
+				}
+			}
+
+			var nextLocalId = 0;
+			for (var y = 0; y < h; y++)
+			{
+				for (var x = 0; x < w; x++)
+				{
+					var idx = y * w + x;
+					if (!_shapeMaskMembership[baseIndex + idx] || _shapeIslandLocalId[baseIndex + idx] != 0)
+					{
+						continue;
+					}
+
+					nextLocalId++;
+					var stack = new Stack<Vector2I>();
+					stack.Push(new Vector2I(x, y));
+					while (stack.Count > 0)
+					{
+						var c = stack.Pop();
+						var cx = c.X;
+						var cy = c.Y;
+						var ci = cy * w + cx;
+						if ((uint)cx >= (uint)w || (uint)cy >= (uint)h)
+						{
+							continue;
+						}
+
+						if (!_shapeMaskMembership[baseIndex + ci] || _shapeIslandLocalId[baseIndex + ci] != 0)
+						{
+							continue;
+						}
+
+						_shapeIslandLocalId[baseIndex + ci] = nextLocalId;
+						stack.Push(new Vector2I(cx, cy - 1));
+						stack.Push(new Vector2I(cx - 1, cy));
+						stack.Push(new Vector2I(cx + 1, cy));
+						stack.Push(new Vector2I(cx, cy + 1));
+					}
+				}
+			}
+		}
+	}
+
+	private Image? CreateSizedImageCopy(Texture2D tex)
+	{
+		var source = tex.GetImage();
+		if (source is null)
+		{
+			return null;
+		}
+
+		var copy = source.Duplicate() as Image;
+		if (copy is null)
+		{
+			return null;
+		}
+
+		copy.Resize(SheetSize.X, SheetSize.Y, Image.Interpolation.Nearest);
+		return copy;
+	}
+
+	private void RecomputeShapeMaxIntegrity()
+	{
+		_shapeMaxIntegrityByKey.Clear();
+		_shapeDamageLostByKey.Clear();
+		var stride = SheetSize.X * SheetSize.Y;
+		for (var layer = 0; layer < _resolvedLayerCount; layer++)
+		{
+			var layerMax = GetLayerMaxHealth(layer);
+			var baseIndex = layer * stride;
+			for (var i = 0; i < stride; i++)
+			{
+				var localId = _shapeIslandLocalId[baseIndex + i];
+				if (localId <= 0)
+				{
+					continue;
+				}
+
+				var key = EncodeShapeGlobalKey(layer, localId);
+				if (!_shapeMaxIntegrityByKey.TryGetValue(key, out var acc))
+				{
+					acc = 0;
+				}
+
+				_shapeMaxIntegrityByKey[key] = acc + layerMax;
+			}
+		}
+	}
+
+	private Godot.Collections.Dictionary BuildDamagePercentByShapeKey()
+	{
+		var dict = new Godot.Collections.Dictionary();
+		foreach (var kv in _shapeMaxIntegrityByKey)
+		{
+			var key = kv.Key;
+			var maxV = kv.Value;
+			var lost = _shapeDamageLostByKey.TryGetValue(key, out var l) ? l : 0;
+			var pct = maxV <= 0 ? 0f : Mathf.Clamp(100f * lost / maxV, 0f, 100f);
+			dict[key] = pct;
+		}
+
+		return dict;
+	}
+
+	private void EmitShapeDamageStatsChanged()
+	{
+		EmitSignal(SignalName.ShapeDamageStatsChanged, BuildDamagePercentByShapeKey());
+	}
+
+	/// <summary>All mask-defined shape islands (global keys), sorted for stable UI row order.</summary>
+	public Godot.Collections.Array GetShapeIslandGlobalKeysSorted()
+	{
+		var keys = new List<int>(_shapeMaxIntegrityByKey.Keys);
+		keys.Sort();
+		var arr = new Godot.Collections.Array();
+		foreach (var k in keys)
+		{
+			arr.Add(k);
+		}
+
+		return arr;
+	}
+
 	private int LayeredIndex(int x, int y, int layer)
 	{
 		var stride = SheetSize.X * SheetSize.Y;
 		return layer * stride + y * SheetSize.X + x;
+	}
+
+	private bool IsShapeCell(int x, int y, int layer)
+	{
+		if ((uint)x >= (uint)SheetSize.X || (uint)y >= (uint)SheetSize.Y || (uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return false;
+		}
+
+		return _shapeMaskMembership[LayeredIndex(x, y, layer)];
+	}
+
+	private bool BorderTouchesShapePixel(int x, int y, int layer)
+	{
+		return IsLiveShapePixel(x, y - 1, layer)
+			|| IsLiveShapePixel(x - 1, y, layer)
+			|| IsLiveShapePixel(x + 1, y, layer)
+			|| IsLiveShapePixel(x, y + 1, layer);
+	}
+
+	private bool IsLiveShapePixel(int x, int y, int layer)
+	{
+		if ((uint)x >= (uint)SheetSize.X || (uint)y >= (uint)SheetSize.Y || (uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return false;
+		}
+
+		return GetLayerIntegrity(x, y, layer) > IntegrityMin && IsShapeCell(x, y, layer);
 	}
 
 	private int GetLayerIntegrity(int x, int y, int layer)

@@ -2,15 +2,22 @@
 
 [ext_resource type="Script" uid="uid://kif4wa6ydaqw" path="res://scenes/MainSceneController.cs" id="1_main"]
 [ext_resource type="PackedScene" uid="uid://bxwwyt704tk1i" path="res://destructible_pixel_sheet.tscn" id="2_sheet"]
-[ext_resource type="Texture2D" uid="uid://bp3p8vko1ejk3" path="res://assets/images/GlobnarLayer1.png" id="3_ygjfp"]
-[ext_resource type="Texture2D" uid="uid://dx7fkg0efb7i4" path="res://assets/images/GlobnarLayer2.png" id="4_1wiy7"]
-[ext_resource type="Texture2D" uid="uid://6kqw3qeactf4" path="res://assets/images/GlobnarLayer3.png" id="5_u1u68"]
-[ext_resource type="Texture2D" uid="uid://dohs4drhrpqcl" path="res://assets/images/GlobnarLayer4.png" id="6_x537r"]
+[ext_resource type="Texture2D" uid="uid://b2nopyni26q8v" path="res://assets/images/Globnar1/Globnar1Layer1.png" id="3_x537r"]
+[ext_resource type="Texture2D" uid="uid://3p6agmr1ewhg" path="res://assets/images/Globnar1/Globnar1Layer2eyes.png" id="4_cfq0f"]
+[ext_resource type="Texture2D" uid="uid://cpvehcvgw4my6" path="res://assets/images/Globnar1/Globnar1Layer3.png" id="5_pjux3"]
+[ext_resource type="Texture2D" uid="uid://cjnkxb6p7plva" path="res://assets/images/Globnar1/Globnar1Layer4.png" id="6_o3jky"]
+[ext_resource type="PackedScene" path="res://scenes/ScoreUi.tscn" id="7_score_ui"]
+[ext_resource type="Texture2D" uid="uid://deuam4xam6cgc" path="res://assets/images/Globnar1/Globnar1Shape1+4.png" id="7_x537r"]
+[ext_resource type="Texture2D" uid="uid://die5rpgqjkghn" path="res://assets/images/Globnar1/Globnar1Shape3.png" id="8_cfq0f"]
+[ext_resource type="Texture2D" uid="uid://bps0unmav3ycj" path="res://assets/images/Globnar1/Globnar1Shape2.png" id="8_pjux3"]
 
 [node name="MainScene" type="Node2D" unique_id=19574204]
 script = ExtResource("1_main")
+MinZoom = 2.0
+MaxZoom = 10.0
 PanMomentumScale = 1.0
-PanFriction = 10.0
+PanFriction = 5.0
+MaxPanMomentumSpeed = 1000.0
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=2099319115]
 
@@ -20,7 +27,10 @@ WaveMaxDistance = 10.0
 WavePeakDamage = 10.0
 SheetSize = Vector2i(200, 150)
 LayerCount = 4
-LayerHealth = PackedInt32Array(200, 50, 25, 1000)
-LayerTextures = [ExtResource("3_ygjfp"), ExtResource("4_1wiy7"), ExtResource("5_u1u68"), ExtResource("6_x537r")]
+LayerHealth = PackedInt32Array(50, 50, 25, 1000)
+LayerTextures = [ExtResource("3_x537r"), ExtResource("4_cfq0f"), ExtResource("5_pjux3"), ExtResource("6_o3jky")]
+LayerShapeMasks = [ExtResource("7_x537r"), ExtResource("8_pjux3"), ExtResource("8_cfq0f"), ExtResource("7_x537r")]
 DragVelocityReference = 1000.0
 DragVelocityMaxScale = 1000.0
+
+[node name="ScoreUi" parent="." unique_id=2124478041 instance=ExtResource("7_score_ui")]
