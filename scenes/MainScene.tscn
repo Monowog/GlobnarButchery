@@ -2,12 +2,10 @@
 
 [ext_resource type="Script" uid="uid://kif4wa6ydaqw" path="res://scenes/MainSceneController.cs" id="1_main"]
 [ext_resource type="PackedScene" uid="uid://bxwwyt704tk1i" path="res://destructible_pixel_sheet.tscn" id="2_sheet"]
-[ext_resource type="Texture2D" uid="uid://psj26q3c6tsm" path="res://icon.svg" id="3_c6dvc"]
-
-[sub_resource type="Gradient" id="Gradient_c6dvc"]
-
-[sub_resource type="GradientTexture1D" id="GradientTexture1D_611at"]
-gradient = SubResource("Gradient_c6dvc")
+[ext_resource type="Texture2D" uid="uid://bp3p8vko1ejk3" path="res://assets/images/GlobnarLayer1.png" id="3_ygjfp"]
+[ext_resource type="Texture2D" uid="uid://dx7fkg0efb7i4" path="res://assets/images/GlobnarLayer2.png" id="4_1wiy7"]
+[ext_resource type="Texture2D" uid="uid://6kqw3qeactf4" path="res://assets/images/GlobnarLayer3.png" id="5_u1u68"]
+[ext_resource type="Texture2D" uid="uid://dohs4drhrpqcl" path="res://assets/images/GlobnarLayer4.png" id="6_x537r"]
 
 [node name="MainScene" type="Node2D" unique_id=19574204]
 script = ExtResource("1_main")
@@ -16,10 +14,10 @@ script = ExtResource("1_main")
 
 [node name="DestructiblePixelSheet" parent="." unique_id=12106724 instance=ExtResource("2_sheet")]
 Strength = 3.0
-DamageRadius = 4.0
-WaveMaxDistance = 20.0
-WavePeakDamage = 20.0
+WaveMaxDistance = 10.0
+WavePeakDamage = 10.0
 SheetSize = Vector2i(200, 150)
-LayerTextures = [ExtResource("3_c6dvc"), SubResource("GradientTexture1D_611at"), ExtResource("3_c6dvc")]
+LayerCount = 4
+LayerTextures = [ExtResource("3_ygjfp"), ExtResource("4_1wiy7"), ExtResource("5_u1u68"), ExtResource("6_x537r")]
 DragVelocityReference = 1000.0
 DragVelocityMaxScale = 1000.0

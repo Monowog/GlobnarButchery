@@ -53,6 +53,10 @@ public partial class DestructiblePixelSheet : Sprite2D
 	private int _resolvedLayerCount;
 	private Vector2I? _lastHeldCell;
 	private bool _textureDirty;
+	private readonly List<Vector2I> _hoverBorderPixels = new();
+	private Vector2I _hoverSourceCell;
+	private int _hoverSourceLayer = -1;
+	private bool _hoverActive;
 	private Vector2 _lastDragMouseCanvas;
 	private bool _dragMouseSampleValid;
 
@@ -85,6 +89,15 @@ public partial class DestructiblePixelSheet : Sprite2D
 
 	public override void _Process(double delta)
 	{
+		if (!Input.IsMouseButtonPressed(MouseButton.Left))
+		{
+			UpdateHoverBorderHighlight();
+		}
+		else
+		{
+			ClearHoverBorderHighlight();
+		}
+
 		if (_waveRunning)
 		{
 			StepWave((float)delta);
@@ -163,13 +176,19 @@ public partial class DestructiblePixelSheet : Sprite2D
 	{
 		if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Right && mb.Pressed)
 		{
+			ClearHoverBorderHighlight();
+			var popped = false;
 			if (TryCanvasToCell(mb.Position, out var popCell) && TryGetTopNonZeroLayer(popCell.X, popCell.Y, out var popLayer))
 			{
-				PopIslandAt(popCell.X, popCell.Y, popLayer);
-				FlushTextureIfDirty();
-			} else {
+				popped = PopIslandAt(popCell.X, popCell.Y, popLayer);
+			}
+
+			if (!popped)
+			{
 				WaveClickMode = !WaveClickMode;
 			}
+
+			FlushTextureIfDirty();
 
 			_lastHeldCell = null;
 			_dragMouseSampleValid = false;
@@ -181,6 +200,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 		{
 			if (mb2.Pressed)
 			{
+				ClearHoverBorderHighlight();
 				if (!TryCanvasToCell(mb2.Position, out var pressCell))
 				{
 					return;
@@ -229,9 +249,48 @@ public partial class DestructiblePixelSheet : Sprite2D
 		}
 	}
 
-	private void PopIslandAt(int startX, int startY, int layer)
+	private bool PopIslandAt(int startX, int startY, int layer)
 	{
 		if ((uint)startX >= (uint)SheetSize.X || (uint)startY >= (uint)SheetSize.Y || (uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return false;
+		}
+
+		if (GetLayerIntegrity(startX, startY, layer) <= IntegrityMin)
+		{
+			return false;
+		}
+
+		AnalyzeIsland(startX, startY, layer, out var islandCells, out _, out var touchesEdge);
+
+		if (touchesEdge || islandCells.Count == 0)
+		{
+			return false;
+		}
+
+		foreach (var p in islandCells)
+		{
+			SetLayerIntegrity(p.X, p.Y, layer, IntegrityMin);
+			SyncPixel(p.X, p.Y);
+		}
+
+		if (islandCells.Count > 0)
+		{
+			_textureDirty = true;
+		}
+
+		return true;
+	}
+
+	private void AnalyzeIsland(int startX, int startY, int layer, out List<Vector2I> islandCells, out List<Vector2I> borderZeroCells, out bool touchesEdge)
+	{
+		var width = SheetSize.X;
+		var height = SheetSize.Y;
+		islandCells = new List<Vector2I>();
+		borderZeroCells = new List<Vector2I>();
+		touchesEdge = false;
+
+		if ((uint)startX >= (uint)width || (uint)startY >= (uint)height || (uint)layer >= (uint)_resolvedLayerCount)
 		{
 			return;
 		}
@@ -241,14 +300,12 @@ public partial class DestructiblePixelSheet : Sprite2D
 			return;
 		}
 
-		var width = SheetSize.X;
-		var height = SheetSize.Y;
 		var visited = new bool[width * height];
+		var borderVisited = new bool[width * height];
+		var borders = borderZeroCells;
 		var stack = new Stack<Vector2I>();
-		var islandCells = new List<Vector2I>();
 		stack.Push(new Vector2I(startX, startY));
 
-		var touchesEdge = false;
 		while (stack.Count > 0)
 		{
 			var c = stack.Pop();
@@ -277,32 +334,100 @@ public partial class DestructiblePixelSheet : Sprite2D
 				touchesEdge = true;
 			}
 
-			// 8-way adjacency
-			stack.Push(new Vector2I(x - 1, y - 1));
+			// 4-way island connectivity.
 			stack.Push(new Vector2I(x, y - 1));
-			stack.Push(new Vector2I(x + 1, y - 1));
 			stack.Push(new Vector2I(x - 1, y));
 			stack.Push(new Vector2I(x + 1, y));
-			stack.Push(new Vector2I(x - 1, y + 1));
 			stack.Push(new Vector2I(x, y + 1));
-			stack.Push(new Vector2I(x + 1, y + 1));
+
+			// 4-way nearest zero-integrity border around this island (same layer).
+			TryAddBorderZero(x, y - 1);
+			TryAddBorderZero(x - 1, y);
+			TryAddBorderZero(x + 1, y);
+			TryAddBorderZero(x, y + 1);
 		}
 
-		if (touchesEdge || islandCells.Count == 0)
+		void TryAddBorderZero(int bx, int by)
+		{
+			if ((uint)bx >= (uint)width || (uint)by >= (uint)height)
+			{
+				return;
+			}
+
+			var bi = by * width + bx;
+			if (borderVisited[bi] || visited[bi])
+			{
+				return;
+			}
+
+			if (GetLayerIntegrity(bx, by, layer) > IntegrityMin)
+			{
+				return;
+			}
+
+			borderVisited[bi] = true;
+			borders.Add(new Vector2I(bx, by));
+		}
+	}
+
+	private void UpdateHoverBorderHighlight()
+	{
+		if (!TryCanvasToCell(GetViewport().GetMousePosition(), out var hoverCell))
+		{
+			ClearHoverBorderHighlight();
+			FlushTextureIfDirty();
+			return;
+		}
+
+		if (!TryGetTopNonZeroLayer(hoverCell.X, hoverCell.Y, out var layer))
+		{
+			ClearHoverBorderHighlight();
+			FlushTextureIfDirty();
+			return;
+		}
+
+		if (_hoverActive && _hoverSourceLayer == layer && _hoverSourceCell == hoverCell)
 		{
 			return;
 		}
 
-		foreach (var p in islandCells)
+		ClearHoverBorderHighlight();
+		AnalyzeIsland(hoverCell.X, hoverCell.Y, layer, out var islandCells, out var borderCells, out var touchesEdge);
+		if (touchesEdge || islandCells.Count == 0 || borderCells.Count == 0)
 		{
-			SetLayerIntegrity(p.X, p.Y, layer, IntegrityMin);
+			FlushTextureIfDirty();
+			return;
+		}
+
+		_hoverBorderPixels.AddRange(borderCells);
+		_hoverSourceCell = hoverCell;
+		_hoverSourceLayer = layer;
+		_hoverActive = true;
+		foreach (var p in _hoverBorderPixels)
+		{
+			_image.SetPixel(p.X, p.Y, Colors.Blue);
+		}
+
+		_textureDirty = true;
+		FlushTextureIfDirty();
+	}
+
+	private void ClearHoverBorderHighlight()
+	{
+		if (!_hoverActive)
+		{
+			return;
+		}
+
+		foreach (var p in _hoverBorderPixels)
+		{
 			SyncPixel(p.X, p.Y);
 		}
 
-		if (islandCells.Count > 0)
-		{
-			_textureDirty = true;
-		}
+		_hoverBorderPixels.Clear();
+		_hoverSourceLayer = -1;
+		_hoverActive = false;
+		_textureDirty = true;
 	}
 
 	private float GetEffectiveWaveMax()
