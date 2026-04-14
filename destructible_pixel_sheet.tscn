@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://bxwwyt704tk1i"]
+
+[ext_resource type="Script" uid="uid://dvxgrjnrmw64o" path="res://DestructiblePixelSheet.cs" id="1_sheet"]
+
+[node name="DestructiblePixelSheet" type="Sprite2D" unique_id=1163324328]
+texture_filter = 1
+centered = false
+script = ExtResource("1_sheet")

@@ -1,0 +1,25 @@
+[gd_scene format=3 uid="uid://4fovoj4qll5o"]
+
+[ext_resource type="Script" uid="uid://kif4wa6ydaqw" path="res://scenes/MainSceneController.cs" id="1_main"]
+[ext_resource type="PackedScene" uid="uid://bxwwyt704tk1i" path="res://destructible_pixel_sheet.tscn" id="2_sheet"]
+[ext_resource type="Texture2D" uid="uid://psj26q3c6tsm" path="res://icon.svg" id="3_c6dvc"]
+
+[sub_resource type="Gradient" id="Gradient_c6dvc"]
+
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_611at"]
+gradient = SubResource("Gradient_c6dvc")
+
+[node name="MainScene" type="Node2D" unique_id=19574204]
+script = ExtResource("1_main")
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=2099319115]
+
+[node name="DestructiblePixelSheet" parent="." unique_id=12106724 instance=ExtResource("2_sheet")]
+Strength = 3.0
+DamageRadius = 4.0
+WaveMaxDistance = 20.0
+WavePeakDamage = 20.0
+SheetSize = Vector2i(200, 150)
+LayerTextures = [ExtResource("3_c6dvc"), SubResource("GradientTexture1D_611at"), ExtResource("3_c6dvc")]
+DragVelocityReference = 1000.0
+DragVelocityMaxScale = 1000.0
