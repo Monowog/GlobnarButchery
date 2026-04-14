@@ -6,7 +6,7 @@ using System.Collections.Generic;
 public partial class DestructiblePixelSheet : Sprite2D
 {
 	private const int IntegrityMin = 0;
-	private const int IntegrityMax = 100;
+	private const int DefaultLayerHealth = 100;
 	private const float BaseClickDamage = 30f;
 	private const float BaseDragDamagePerSecond = 100f;
 	private const float MaxDamageRadius = 256f;
@@ -37,6 +37,9 @@ public partial class DestructiblePixelSheet : Sprite2D
 	public int LayerCount { get; set; } = 3;
 
 	[Export]
+	public int[] LayerHealth { get; set; } = new int[0];
+
+	[Export]
 	public Texture2D[] LayerTextures { get; set; } = new Texture2D[0];
 
 	// Viewport px/s: drag DPS uses 1× scale here; brush radius lerps linearly from DamageRadius down to 1 here.
@@ -49,6 +52,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 	private Image _image = null!;
 	private ImageTexture _texture = null!;
 	private int[] _integrity = null!;
+	private int[] _layerMaxHealth = null!;
 	private Color[] _layerBaseColors = null!;
 	private int _resolvedLayerCount;
 	private Vector2I? _lastHeldCell;
@@ -77,7 +81,19 @@ public partial class DestructiblePixelSheet : Sprite2D
 		LayerCount = _resolvedLayerCount;
 
 		_integrity = new int[SheetSize.X * SheetSize.Y * _resolvedLayerCount];
-		Array.Fill(_integrity, IntegrityMax);
+		_layerMaxHealth = new int[_resolvedLayerCount];
+		var stride = SheetSize.X * SheetSize.Y;
+		for (var layer = 0; layer < _resolvedLayerCount; layer++)
+		{
+			var maxHealth = layer < LayerHealth.Length ? LayerHealth[layer] : DefaultLayerHealth;
+			maxHealth = Mathf.Max(1, maxHealth);
+			_layerMaxHealth[layer] = maxHealth;
+			var baseIndex = layer * stride;
+			for (var i = 0; i < stride; i++)
+			{
+				_integrity[baseIndex + i] = maxHealth;
+			}
+		}
 		BuildLayerRasterColors();
 
 		_image = Image.CreateEmpty(SheetSize.X, SheetSize.Y, false, Image.Format.Rgba8);
@@ -716,6 +732,16 @@ public partial class DestructiblePixelSheet : Sprite2D
 		return _layerBaseColors[LayeredIndex(x, y, layer)];
 	}
 
+	private int GetLayerMaxHealth(int layer)
+	{
+		if ((uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return DefaultLayerHealth;
+		}
+
+		return _layerMaxHealth[layer];
+	}
+
 	private void SetLayerIntegrity(int x, int y, int layer, int value)
 	{
 		if ((uint)x >= (uint)SheetSize.X || (uint)y >= (uint)SheetSize.Y || (uint)layer >= (uint)_resolvedLayerCount)
@@ -723,7 +749,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 			return;
 		}
 
-		_integrity[LayeredIndex(x, y, layer)] = Mathf.Clamp(value, IntegrityMin, IntegrityMax);
+		_integrity[LayeredIndex(x, y, layer)] = Mathf.Clamp(value, IntegrityMin, GetLayerMaxHealth(layer));
 	}
 
 	private bool TryGetVisibleLayer(int x, int y, out int layer, out int integrity)
@@ -759,12 +785,6 @@ public partial class DestructiblePixelSheet : Sprite2D
 		return false;
 	}
 
-	private static Color IntegrityToColor(int v)
-	{
-		var a = Mathf.Clamp(v, IntegrityMin, IntegrityMax) / (float)IntegrityMax;
-		return new Color(0.85f, 0.85f, 0.85f, a);
-	}
-
 	private void SyncPixel(int x, int y)
 	{
 		if ((uint)x >= (uint)SheetSize.X || (uint)y >= (uint)SheetSize.Y)
@@ -779,7 +799,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 		}
 
 		var c = GetLayerBaseColor(x, y, layer);
-		c.A *= Mathf.Clamp(integrity, IntegrityMin, IntegrityMax) / (float)IntegrityMax;
+		c.A *= Mathf.Clamp(integrity, IntegrityMin, GetLayerMaxHealth(layer)) / (float)GetLayerMaxHealth(layer);
 		_image.SetPixel(x, y, c);
 	}
 

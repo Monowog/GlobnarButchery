@@ -9,6 +9,8 @@
 
 [node name="MainScene" type="Node2D" unique_id=19574204]
 script = ExtResource("1_main")
+PanMomentumScale = 1.0
+PanFriction = 10.0
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=2099319115]
 
@@ -18,6 +20,7 @@ WaveMaxDistance = 10.0
 WavePeakDamage = 10.0
 SheetSize = Vector2i(200, 150)
 LayerCount = 4
+LayerHealth = PackedInt32Array(200, 50, 25, 1000)
 LayerTextures = [ExtResource("3_ygjfp"), ExtResource("4_1wiy7"), ExtResource("5_u1u68"), ExtResource("6_x537r")]
 DragVelocityReference = 1000.0
 DragVelocityMaxScale = 1000.0
