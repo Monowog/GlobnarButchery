@@ -5,7 +5,7 @@ using System.Collections.Generic;
 public partial class MainSceneController : Node2D
 {
 	[Signal]
-	public delegate void ScoreChangedEventHandler(Godot.Collections.Dictionary scoreByShapeKey, Godot.Collections.Dictionary damagePercentByShapeKey, Godot.Collections.Array shapeIslandKeysSorted);
+	public delegate void ScoreChangedEventHandler(Godot.Collections.Dictionary scoreByShapeKey, Godot.Collections.Dictionary damagePercentByShapeKey, Godot.Collections.Array organKeysSorted, Godot.Collections.Dictionary organDestroyedUiFlags);
 
 	[Export]
 	public float ZoomStep { get; set; } = 0.15f;
@@ -33,6 +33,9 @@ public partial class MainSceneController : Node2D
 
 	[Export]
 	public Vector2 CameraBoundsMax { get; set; } = new(800f, 600f);
+
+	[Export]
+	public float OrganDestroyedDamagePercentThreshold { get; set; } = 30f;
 
 	private Camera2D _camera = null!;
 	private DestructiblePixelSheet _sheet = null!;
@@ -186,20 +189,42 @@ public partial class MainSceneController : Node2D
 			_scoreByShapeKey[key] = prev + pts;
 		}
 
-		EmitSignal(SignalName.ScoreChanged, BuildHarvestScorePercentByShapeKey(), _damagePercentByShapeKey, _sheet.GetShapeIslandGlobalKeysSorted());
+		var allKeys = _sheet.GetOrganGlobalKeysSorted();
+		EmitSignal(SignalName.ScoreChanged, BuildHarvestScorePercentByShapeKey(allKeys), _damagePercentByShapeKey, allKeys, BuildOrganDestroyedUiFlags());
 		GD.Print($"Harvest +{totalPoints}");
 	}
 
 	private void OnShapeDamageStatsChanged(Godot.Collections.Dictionary damagePercentByShapeKey)
 	{
 		_damagePercentByShapeKey = damagePercentByShapeKey;
-		EmitSignal(SignalName.ScoreChanged, BuildHarvestScorePercentByShapeKey(), _damagePercentByShapeKey, _sheet.GetShapeIslandGlobalKeysSorted());
+		var allKeys = _sheet.GetOrganGlobalKeysSorted();
+		EmitSignal(SignalName.ScoreChanged, BuildHarvestScorePercentByShapeKey(allKeys), _damagePercentByShapeKey, allKeys, BuildOrganDestroyedUiFlags());
 	}
 
-	private Godot.Collections.Dictionary BuildHarvestScorePercentByShapeKey()
+	private bool IsOrganDestroyedForUi(int shapeKey)
+	{
+		var dmg = _damagePercentByShapeKey.ContainsKey(shapeKey)
+			? _damagePercentByShapeKey[shapeKey].AsSingle()
+			: 0f;
+		return dmg > OrganDestroyedDamagePercentThreshold;
+	}
+
+	private Godot.Collections.Dictionary BuildOrganDestroyedUiFlags()
 	{
 		var gd = new Godot.Collections.Dictionary();
-		foreach (Variant vk in _sheet.GetShapeIslandGlobalKeysSorted())
+		foreach (Variant vk in _sheet.GetOrganGlobalKeysSorted())
+		{
+			var key = vk.AsInt32();
+			gd[key] = IsOrganDestroyedForUi(key);
+		}
+
+		return gd;
+	}
+
+	private Godot.Collections.Dictionary BuildHarvestScorePercentByShapeKey(Godot.Collections.Array organKeysSorted)
+	{
+		var gd = new Godot.Collections.Dictionary();
+		foreach (Variant vk in organKeysSorted)
 		{
 			var key = vk.AsInt32();
 			_scoreByShapeKey.TryGetValue(key, out var cumulative);

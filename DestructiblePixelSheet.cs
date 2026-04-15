@@ -82,8 +82,8 @@ public partial class DestructiblePixelSheet : Sprite2D
 	private int[] _layerMaxHealth = null!;
 	private Color[] _layerBaseColors = null!;
 	private bool[] _shapeMaskMembership = null!;
-	// Per-pixel local connected-component id within layer (0 = non-shape); see EncodeShapeGlobalKey.
-	private int[] _shapeIslandLocalId = null!;
+	// Per-pixel local connected-component id within organ mask on layer (0 = non-shape); see EncodeShapeGlobalKey.
+	private int[] _organLocalId = null!;
 	private readonly Dictionary<int, int> _shapeMaxIntegrityByKey = new();
 	private readonly Dictionary<int, int> _shapeDamageLostByKey = new();
 	public const int ShapeKeyLayerStride = 100000;
@@ -420,7 +420,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 			}
 
 			var first = blob[0];
-			var localId = _shapeIslandLocalId[LayeredIndex(first.X, first.Y, layer)];
+			var localId = _organLocalId[LayeredIndex(first.X, first.Y, layer)];
 			if (localId <= 0)
 			{
 				continue;
@@ -844,7 +844,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 			remaining -= integrityLost;
 			if (integrityLost > 0 && IsShapeCell(x, y, layer))
 			{
-				var localId = _shapeIslandLocalId[LayeredIndex(x, y, layer)];
+				var localId = _organLocalId[LayeredIndex(x, y, layer)];
 				if (localId > 0)
 				{
 					var gk = EncodeShapeGlobalKey(layer, localId);
@@ -960,7 +960,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 		var w = SheetSize.X;
 		var h = SheetSize.Y;
 		_shapeMaskMembership = new bool[stride * _resolvedLayerCount];
-		_shapeIslandLocalId = new int[stride * _resolvedLayerCount];
+		_organLocalId = new int[stride * _resolvedLayerCount];
 
 		for (var layer = 0; layer < _resolvedLayerCount; layer++)
 		{
@@ -995,7 +995,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 				for (var x = 0; x < w; x++)
 				{
 					var idx = y * w + x;
-					if (!_shapeMaskMembership[baseIndex + idx] || _shapeIslandLocalId[baseIndex + idx] != 0)
+					if (!_shapeMaskMembership[baseIndex + idx] || _organLocalId[baseIndex + idx] != 0)
 					{
 						continue;
 					}
@@ -1014,12 +1014,12 @@ public partial class DestructiblePixelSheet : Sprite2D
 							continue;
 						}
 
-						if (!_shapeMaskMembership[baseIndex + ci] || _shapeIslandLocalId[baseIndex + ci] != 0)
+						if (!_shapeMaskMembership[baseIndex + ci] || _organLocalId[baseIndex + ci] != 0)
 						{
 							continue;
 						}
 
-						_shapeIslandLocalId[baseIndex + ci] = nextLocalId;
+						_organLocalId[baseIndex + ci] = nextLocalId;
 						stack.Push(new Vector2I(cx, cy - 1));
 						stack.Push(new Vector2I(cx - 1, cy));
 						stack.Push(new Vector2I(cx + 1, cy));
@@ -1059,7 +1059,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 			var baseIndex = layer * stride;
 			for (var i = 0; i < stride; i++)
 			{
-				var localId = _shapeIslandLocalId[baseIndex + i];
+				var localId = _organLocalId[baseIndex + i];
 				if (localId <= 0)
 				{
 					continue;
@@ -1102,8 +1102,8 @@ public partial class DestructiblePixelSheet : Sprite2D
 		return _shapeMaxIntegrityByKey.TryGetValue(globalShapeKey, out var v) ? v : 0;
 	}
 
-	/// <summary>All mask-defined shape islands (global keys), sorted for stable UI row order.</summary>
-	public Godot.Collections.Array GetShapeIslandGlobalKeysSorted()
+	/// <summary>All mask-defined organs (global keys), sorted for stable UI row order.</summary>
+	public Godot.Collections.Array GetOrganGlobalKeysSorted()
 	{
 		var keys = new List<int>(_shapeMaxIntegrityByKey.Keys);
 		keys.Sort();
