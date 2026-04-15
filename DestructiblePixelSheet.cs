@@ -14,7 +14,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 	private const float MaxWaveDistanceCap = 512f;
 
 	[Export]
-	public float Strength { get; set; } = 1f;
+	public float Strength { get; set; } = 3f;
 
 	[Export]
 	public float DamageRadius { get; set; } = 3f;
@@ -23,19 +23,19 @@ public partial class DestructiblePixelSheet : Sprite2D
 	public bool WaveClickMode { get; set; }
 
 	[Export]
-	public float WaveMaxDistance { get; set; } = 128f;
+	public float WaveMaxDistance { get; set; } = 10f;
 
 	[Export]
 	public float WaveSpeed { get; set; } = 200f;
 
 	[Export]
-	public float WavePeakDamage { get; set; } = 40f;
+	public float WavePeakDamage { get; set; } = 10f;
 
 	[Export]
-	public Vector2I SheetSize { get; set; } = new(1024, 768);
+	public Vector2I SheetSize { get; set; } = new(200, 150);
 
 	[Export]
-	public int LayerCount { get; set; } = 3;
+	public int LayerCount { get; set; } = 4;
 
 	[Export]
 	public int[] LayerHealth { get; set; } = new int[0];
@@ -94,6 +94,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 	private Vector2I? _lastHeldCell;
 	private bool _textureDirty;
 	private readonly List<Vector2I> _hoverBorderPixels = new();
+	private readonly List<Vector2I> _nonHoverExposedBorderPixels = new();
 	private Vector2I _hoverSourceCell;
 	private int _hoverSourceLayer = -1;
 	private bool _hoverActive;
@@ -204,10 +205,12 @@ public partial class DestructiblePixelSheet : Sprite2D
 		if (!Input.IsMouseButtonPressed(MouseButton.Left))
 		{
 			UpdateHoverBorderHighlight();
+			UpdateNonHoverExposedBorderHighlight();
 		}
 		else
 		{
 			ClearHoverBorderHighlight();
+			ClearNonHoverExposedBorderHighlight();
 		}
 
 		if (_waveRunning)
@@ -289,6 +292,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 		if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Right && mb.Pressed)
 		{
 			ClearHoverBorderHighlight();
+			ClearNonHoverExposedBorderHighlight();
 			var popped = false;
 			if (TryCanvasToCell(mb.Position, out var popCell) && TryGetTopNonZeroLayer(popCell.X, popCell.Y, out var popLayer))
 			{
@@ -314,6 +318,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 			if (mb2.Pressed)
 			{
 				ClearHoverBorderHighlight();
+				ClearNonHoverExposedBorderHighlight();
 				if (!TryCanvasToCell(mb2.Position, out var pressCell))
 				{
 					return;
@@ -721,6 +726,104 @@ public partial class DestructiblePixelSheet : Sprite2D
 		_hoverBorderPixels.Clear();
 		_hoverSourceLayer = -1;
 		_hoverActive = false;
+		_textureDirty = true;
+	}
+
+	private void UpdateNonHoverExposedBorderHighlight()
+	{
+		ClearNonHoverExposedBorderHighlight();
+
+		var excludeShapeKey = -1;
+		if (TryCanvasToCell(GetViewport().GetMousePosition(), out var hoverCell) && TryGetTopNonZeroLayer(hoverCell.X, hoverCell.Y, out var hoverLayer))
+		{
+			var localId = _organLocalId[LayeredIndex(hoverCell.X, hoverCell.Y, hoverLayer)];
+			if (localId > 0 && IsShapeCell(hoverCell.X, hoverCell.Y, hoverLayer))
+			{
+				excludeShapeKey = EncodeShapeGlobalKey(hoverLayer, localId);
+			}
+		}
+
+		var w = SheetSize.X;
+		var h = SheetSize.Y;
+		var borderSeen = new bool[w * h];
+		for (var layer = 0; layer < _resolvedLayerCount; layer++)
+		{
+			for (var y = 0; y < h; y++)
+			{
+				for (var x = 0; x < w; x++)
+				{
+					if (!IsShapeCell(x, y, layer) || GetLayerIntegrity(x, y, layer) <= IntegrityMin)
+					{
+						continue;
+					}
+
+					var localId = _organLocalId[LayeredIndex(x, y, layer)];
+					if (localId <= 0)
+					{
+						continue;
+					}
+
+					var gk = EncodeShapeGlobalKey(layer, localId);
+					if (gk == excludeShapeKey)
+					{
+						continue;
+					}
+
+					TryAddBorderPixel(x, y - 1, layer);
+					TryAddBorderPixel(x - 1, y, layer);
+					TryAddBorderPixel(x + 1, y, layer);
+					TryAddBorderPixel(x, y + 1, layer);
+				}
+			}
+		}
+
+		foreach (var p in _nonHoverExposedBorderPixels)
+		{
+			_image.SetPixel(p.X, p.Y, Colors.White);
+		}
+
+		if (_nonHoverExposedBorderPixels.Count > 0)
+		{
+			_textureDirty = true;
+			FlushTextureIfDirty();
+		}
+
+		void TryAddBorderPixel(int bx, int by, int layer)
+		{
+			if ((uint)bx >= (uint)w || (uint)by >= (uint)h)
+			{
+				return;
+			}
+
+			if (GetLayerIntegrity(bx, by, layer) > IntegrityMin)
+			{
+				return;
+			}
+
+			var i = by * w + bx;
+			if (borderSeen[i])
+			{
+				return;
+			}
+
+			borderSeen[i] = true;
+			_nonHoverExposedBorderPixels.Add(new Vector2I(bx, by));
+		}
+	}
+
+	private void ClearNonHoverExposedBorderHighlight()
+	{
+		if (_nonHoverExposedBorderPixels.Count == 0)
+		{
+			return;
+		}
+
+		foreach (var p in _nonHoverExposedBorderPixels)
+		{
+			SyncPixel(p.X, p.Y);
+		}
+
+		_nonHoverExposedBorderPixels.Clear();
 		_textureDirty = true;
 	}
 

@@ -58,6 +58,7 @@ public partial class MainSceneController : Node2D
 		_sheet = GetNode<DestructiblePixelSheet>("DestructiblePixelSheet");
 		_sheet.PointsAwarded += OnPointsAwarded;
 		_sheet.ShapeDamageStatsChanged += OnShapeDamageStatsChanged;
+		EmitCurrentScoreUiState();
 		_camera.MakeCurrent();
 		_camera.Position = new Vector2(_sheet.SheetSize.X * 0.5f, _sheet.SheetSize.Y * 0.5f);
 		if (UseCameraBounds)
@@ -154,7 +155,25 @@ public partial class MainSceneController : Node2D
 		var maxX = Mathf.Max(CameraBoundsMin.X, CameraBoundsMax.X);
 		var minY = Mathf.Min(CameraBoundsMin.Y, CameraBoundsMax.Y);
 		var maxY = Mathf.Max(CameraBoundsMin.Y, CameraBoundsMax.Y);
-		return new Vector2(Mathf.Clamp(p.X, minX, maxX), Mathf.Clamp(p.Y, minY, maxY));
+		var viewportSize = GetViewportRect().Size;
+		var halfViewW = viewportSize.X * 0.5f * _camera.Zoom.X;
+		var halfViewH = viewportSize.Y * 0.5f * _camera.Zoom.Y;
+
+		// Clamp camera center so camera edges stay within bounds when possible.
+		// If the viewport is larger than bounds on an axis, fall back to center-clamp on that axis
+		// so panning remains possible.
+		var cxMin = minX + halfViewW;
+		var cxMax = maxX - halfViewW;
+		var cyMin = minY + halfViewH;
+		var cyMax = maxY - halfViewH;
+
+		var clampedX = cxMin <= cxMax
+			? Mathf.Clamp(p.X, cxMin, cxMax)
+			: Mathf.Clamp(p.X, minX, maxX);
+		var clampedY = cyMin <= cyMax
+			? Mathf.Clamp(p.Y, cyMin, cyMax)
+			: Mathf.Clamp(p.Y, minY, maxY);
+		return new Vector2(clampedX, clampedY);
 	}
 
 	private Vector2 ClampMomentum(Vector2 v)
@@ -173,6 +192,10 @@ public partial class MainSceneController : Node2D
 	{
 		var z = Mathf.Clamp(_camera.Zoom.X * factor, MinZoom, MaxZoom);
 		_camera.Zoom = new Vector2(z, z);
+		if (UseCameraBounds)
+		{
+			_camera.Position = ClampToBounds(_camera.Position);
+		}
 	}
 
 	private void OnPointsAwarded(int totalPoints, Godot.Collections.Array blobPayloads)
@@ -196,13 +219,18 @@ public partial class MainSceneController : Node2D
 			_scoreByShapeKey[key] = prev + pts;
 		}
 
+		EmitCurrentScoreUiState();
+		GD.Print($"Harvest +{totalPoints}");
+	}
+
+	private void EmitCurrentScoreUiState()
+	{
 		var allKeys = _sheet.GetOrganGlobalKeysSorted();
 		var destroyedFlags = BuildOrganDestroyedUiFlags();
 		var scoreBy = BuildHarvestScorePercentByShapeKey(allKeys);
 		var harvestedFlags = BuildOrganHarvestedUiFlags(scoreBy, allKeys);
 		EmitSignal(SignalName.ScoreChanged, scoreBy, _damagePercentByShapeKey, allKeys, destroyedFlags, harvestedFlags);
 		_lastOrganDestroyedUiFlagsSnapshot = CloneVariantDictionary(destroyedFlags);
-		GD.Print($"Harvest +{totalPoints}");
 	}
 
 	private void OnShapeDamageStatsChanged(Godot.Collections.Dictionary damagePercentByShapeKey)

@@ -1,18 +1,17 @@
 [gd_scene format=3 uid="uid://4fovoj4qll5o"]
 
 [ext_resource type="Script" uid="uid://kif4wa6ydaqw" path="res://scenes/MainSceneController.cs" id="1_main"]
+[ext_resource type="Texture2D" uid="uid://ceiyyw5fihkeu" path="res://assets/images/backgrounds/ButcherShop.png" id="2_o3jky"]
 [ext_resource type="PackedScene" uid="uid://bxwwyt704tk1i" path="res://destructible_pixel_sheet.tscn" id="2_sheet"]
-[ext_resource type="Texture2D" uid="uid://b2nopyni26q8v" path="res://assets/images/globnar1/Globnar1Layer1.png" id="3_kp0ql"]
-[ext_resource type="Texture2D" uid="uid://3p6agmr1ewhg" path="res://assets/images/globnar1/Globnar1Layer2eyes.png" id="4_08o8g"]
-[ext_resource type="Texture2D" uid="uid://cpvehcvgw4my6" path="res://assets/images/globnar1/Globnar1Layer3.png" id="5_0cxu4"]
-[ext_resource type="Texture2D" uid="uid://cjnkxb6p7plva" path="res://assets/images/globnar1/Globnar1Layer4.png" id="6_o3jky"]
+[ext_resource type="Texture2D" uid="uid://b42o8kp3kfgb0" path="res://assets/images/porknar/Porknar-1.png" id="3_pjux3"]
+[ext_resource type="Texture2D" uid="uid://b3g4o5jh4exqk" path="res://assets/images/porknar/Porknar-2.png" id="4_o3jky"]
+[ext_resource type="Texture2D" uid="uid://bkoxqbf2aylmy" path="res://assets/images/porknar/Porknar-3.png" id="5_kp0ql"]
+[ext_resource type="Texture2D" uid="uid://cc22ntk75wxk7" path="res://assets/images/porknar/Porknar-4.png" id="6_08o8g"]
+[ext_resource type="Texture2D" uid="uid://bixwodnf2gu37" path="res://assets/images/porknar/Porknar-Organs-1+4.png" id="7_0cxu4"]
 [ext_resource type="PackedScene" path="res://scenes/ScoreUi.tscn" id="7_score_ui"]
-[ext_resource type="Texture2D" uid="uid://deuam4xam6cgc" path="res://assets/images/globnar1/Globnar1Shape1+4.png" id="7_x537r"]
-[ext_resource type="Texture2D" uid="uid://die5rpgqjkghn" path="res://assets/images/globnar1/Globnar1Shape3.png" id="8_cfq0f"]
-[ext_resource type="Texture2D" uid="uid://bps0unmav3ycj" path="res://assets/images/globnar1/Globnar1Shape2.png" id="8_pjux3"]
+[ext_resource type="Texture2D" uid="uid://exo5y4qnhd1j" path="res://assets/images/porknar/Porknar-Organs-2.png" id="8_xnxdc"]
+[ext_resource type="Texture2D" uid="uid://bgeydb5jbavft" path="res://assets/images/porknar/Porknar-Organs-3.png" id="9_0ehpd"]
 [ext_resource type="PackedScene" uid="uid://bqx7n2k8m0d4p" path="res://scenes/ClickModeIndicator.tscn" id="9_mode_ui"]
-[ext_resource type="Texture2D" uid="uid://88hlj75my2lw" path="res://assets/images/icons/slice.png" id="12_kp0ql"]
-[ext_resource type="Texture2D" uid="uid://0ymnach6iw5r" path="res://assets/images/icons/hammer.png" id="13_08o8g"]
 
 [node name="MainScene" type="Node2D" unique_id=19574204]
 script = ExtResource("1_main")
@@ -21,26 +20,30 @@ MaxZoom = 10.0
 PanMomentumScale = 1.0
 PanFriction = 5.0
 MaxPanMomentumSpeed = 1000.0
+CameraBoundsMax = Vector2(200, 140)
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=2099319115]
+zoom = Vector2(2, 2)
 
 [node name="DestructiblePixelSheet" parent="." unique_id=12106724 instance=ExtResource("2_sheet")]
-Strength = 3.0
-WaveMaxDistance = 10.0
-WavePeakDamage = 10.0
-SheetSize = Vector2i(200, 150)
-LayerCount = 4
-LayerHealth = PackedInt32Array(50, 50, 25, 1000)
-LayerTextures = [ExtResource("3_kp0ql"), ExtResource("4_08o8g"), ExtResource("5_0cxu4"), ExtResource("6_o3jky")]
-LayerShapeMasks = [ExtResource("7_x537r"), ExtResource("8_pjux3"), ExtResource("8_cfq0f"), ExtResource("7_x537r")]
-LayerShapeDisplayNames = [null, PackedStringArray("Right Eyeball", "Left Eyeball"), PackedStringArray("Heart"), null]
+centered = true
+Strength = 10.0
+DamageRadius = 2.0
+LayerHealth = PackedInt32Array(50, 30, 50, 400)
+LayerTextures = [ExtResource("3_pjux3"), ExtResource("4_o3jky"), ExtResource("5_kp0ql"), ExtResource("6_08o8g")]
+LayerShapeMasks = [ExtResource("7_0cxu4"), ExtResource("8_xnxdc"), ExtResource("9_0ehpd"), ExtResource("7_0cxu4")]
+LayerShapeDisplayNames = [null, PackedStringArray("Left Eye", "Right Eye"), PackedStringArray("Heart"), null]
 IntegrityVisualDarkenMin = 0.0
-LayerVisualTransparency = PackedFloat32Array(0.2, 0.1, 0.1, 0)
+LayerVisualTransparency = PackedFloat32Array(0, 0, 0, 0)
 DragVelocityReference = 1000.0
 DragVelocityMaxScale = 1000.0
 
 [node name="ScoreUi" parent="." unique_id=2124478041 instance=ExtResource("7_score_ui")]
 
 [node name="ClickModeIndicator" parent="." unique_id=1460547512 instance=ExtResource("9_mode_ui")]
-BrushModeTexture = ExtResource("12_kp0ql")
-WaveModeTexture = ExtResource("13_08o8g")
+
+[node name="Background" type="Sprite2D" parent="." unique_id=287465671]
+z_index = -25
+position = Vector2(89.50003, 49.000008)
+scale = Vector2(0.31291664, 0.29464284)
+texture = ExtResource("2_o3jky")
