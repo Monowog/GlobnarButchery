@@ -5,7 +5,10 @@ using System.Collections.Generic;
 public partial class MainSceneController : Node2D
 {
 	[Signal]
-	public delegate void ScoreChangedEventHandler(Godot.Collections.Dictionary scoreByShapeKey, Godot.Collections.Dictionary damagePercentByShapeKey, Godot.Collections.Array organKeysSorted, Godot.Collections.Dictionary organDestroyedUiFlags);
+	public delegate void ScoreChangedEventHandler(Godot.Collections.Dictionary scoreByShapeKey, Godot.Collections.Dictionary damagePercentByShapeKey, Godot.Collections.Array organKeysSorted, Godot.Collections.Dictionary organDestroyedUiFlags, Godot.Collections.Dictionary organHarvestedUiFlags);
+
+	[Signal]
+	public delegate void OrganDamageDisplayChangedEventHandler(Godot.Collections.Dictionary scoreByShapeKey, Godot.Collections.Dictionary damagePercentByShapeKey, Godot.Collections.Dictionary organDestroyedUiFlags, Godot.Collections.Dictionary organHarvestedUiFlags);
 
 	[Export]
 	public float ZoomStep { get; set; } = 0.15f;
@@ -37,12 +40,16 @@ public partial class MainSceneController : Node2D
 	[Export]
 	public float OrganDestroyedDamagePercentThreshold { get; set; } = 30f;
 
+	[Export]
+	public float OrganHarvestedScorePercentThreshold { get; set; } = 60f;
+
 	private Camera2D _camera = null!;
 	private DestructiblePixelSheet _sheet = null!;
 	private bool _panning;
 	private Vector2 _panVelocity;
 	private readonly Dictionary<int, int> _scoreByShapeKey = new();
 	private Godot.Collections.Dictionary _damagePercentByShapeKey = new();
+	private Godot.Collections.Dictionary? _lastOrganDestroyedUiFlagsSnapshot;
 
 	public override void _Ready()
 	{
@@ -190,7 +197,11 @@ public partial class MainSceneController : Node2D
 		}
 
 		var allKeys = _sheet.GetOrganGlobalKeysSorted();
-		EmitSignal(SignalName.ScoreChanged, BuildHarvestScorePercentByShapeKey(allKeys), _damagePercentByShapeKey, allKeys, BuildOrganDestroyedUiFlags());
+		var destroyedFlags = BuildOrganDestroyedUiFlags();
+		var scoreBy = BuildHarvestScorePercentByShapeKey(allKeys);
+		var harvestedFlags = BuildOrganHarvestedUiFlags(scoreBy, allKeys);
+		EmitSignal(SignalName.ScoreChanged, scoreBy, _damagePercentByShapeKey, allKeys, destroyedFlags, harvestedFlags);
+		_lastOrganDestroyedUiFlagsSnapshot = CloneVariantDictionary(destroyedFlags);
 		GD.Print($"Harvest +{totalPoints}");
 	}
 
@@ -198,7 +209,17 @@ public partial class MainSceneController : Node2D
 	{
 		_damagePercentByShapeKey = damagePercentByShapeKey;
 		var allKeys = _sheet.GetOrganGlobalKeysSorted();
-		EmitSignal(SignalName.ScoreChanged, BuildHarvestScorePercentByShapeKey(allKeys), _damagePercentByShapeKey, allKeys, BuildOrganDestroyedUiFlags());
+		var destroyedFlags = BuildOrganDestroyedUiFlags();
+		var scoreBy = BuildHarvestScorePercentByShapeKey(allKeys);
+		var harvestedFlags = BuildOrganHarvestedUiFlags(scoreBy, allKeys);
+		if (_lastOrganDestroyedUiFlagsSnapshot is null || !OrganDestroyedFlagsEqual(_lastOrganDestroyedUiFlagsSnapshot, destroyedFlags))
+		{
+			EmitSignal(SignalName.ScoreChanged, scoreBy, _damagePercentByShapeKey, allKeys, destroyedFlags, harvestedFlags);
+			_lastOrganDestroyedUiFlagsSnapshot = CloneVariantDictionary(destroyedFlags);
+			return;
+		}
+
+		EmitSignal(SignalName.OrganDamageDisplayChanged, scoreBy, _damagePercentByShapeKey, destroyedFlags, harvestedFlags);
 	}
 
 	private bool IsOrganDestroyedForUi(int shapeKey)
@@ -219,6 +240,48 @@ public partial class MainSceneController : Node2D
 		}
 
 		return gd;
+	}
+
+	private Godot.Collections.Dictionary BuildOrganHarvestedUiFlags(Godot.Collections.Dictionary scoreByShapeKey, Godot.Collections.Array organKeysSorted)
+	{
+		var gd = new Godot.Collections.Dictionary();
+		foreach (Variant vk in organKeysSorted)
+		{
+			var key = vk.AsInt32();
+			var score = scoreByShapeKey.ContainsKey(key)
+				? scoreByShapeKey[key].AsSingle()
+				: 0f;
+			gd[key] = score >= OrganHarvestedScorePercentThreshold;
+		}
+
+		return gd;
+	}
+
+	private static Godot.Collections.Dictionary CloneVariantDictionary(Godot.Collections.Dictionary src)
+	{
+		var copy = new Godot.Collections.Dictionary();
+		foreach (var kv in src)
+		{
+			copy[kv.Key] = kv.Value;
+		}
+
+		return copy;
+	}
+
+	private bool OrganDestroyedFlagsEqual(Godot.Collections.Dictionary a, Godot.Collections.Dictionary b)
+	{
+		foreach (Variant vk in _sheet.GetOrganGlobalKeysSorted())
+		{
+			var key = vk.AsInt32();
+			var av = a.ContainsKey(key) && a[key].AsBool();
+			var bv = b.ContainsKey(key) && b[key].AsBool();
+			if (av != bv)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private Godot.Collections.Dictionary BuildHarvestScorePercentByShapeKey(Godot.Collections.Array organKeysSorted)

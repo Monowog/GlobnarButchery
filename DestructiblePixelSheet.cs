@@ -86,6 +86,9 @@ public partial class DestructiblePixelSheet : Sprite2D
 	private int[] _organLocalId = null!;
 	private readonly Dictionary<int, int> _shapeMaxIntegrityByKey = new();
 	private readonly Dictionary<int, int> _shapeDamageLostByKey = new();
+	private readonly HashSet<int> _organThumbnailDirtyKeys = new();
+	private readonly Dictionary<int, Dictionary<int, float>> _harvestedThumbnailOverlayByShapeKey = new();
+	private Image?[]? _layerThumbnailSourceImages;
 	public const int ShapeKeyLayerStride = 100000;
 	private int _resolvedLayerCount;
 	private Vector2I? _lastHeldCell;
@@ -405,6 +408,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 
 		var denom = Mathf.Max(1, shapeIntTotal);
 		var mergedByKey = new Dictionary<int, int>();
+		var harvestedPixelsByKey = new Dictionary<int, Godot.Collections.Array>();
 		foreach (var blob in subIslands)
 		{
 			var shapeIntB = 0;
@@ -431,6 +435,50 @@ public partial class DestructiblePixelSheet : Sprite2D
 			mergedByKey[shapeKey] = prev + pointsB;
 		}
 
+		var layerImgForHarvest = GetOrCreateLayerThumbnailSource(layer);
+		var layerMax = GetLayerMaxHealth(layer);
+		var opaqueF = GetLayerVisualOpaqueFactor(layer);
+
+		var poppedShapeKeys = new HashSet<int>();
+		foreach (var p in islandCells)
+		{
+			if (IsShapeCell(p.X, p.Y, layer))
+			{
+				var lid = _organLocalId[LayeredIndex(p.X, p.Y, layer)];
+				if (lid > 0)
+				{
+					var gk = EncodeShapeGlobalKey(layer, lid);
+					poppedShapeKeys.Add(gk);
+					var currentV = GetLayerIntegrity(p.X, p.Y, layer);
+					if (currentV > IntegrityMin && layerImgForHarvest != null)
+					{
+						var texColor = layerImgForHarvest.GetPixel(p.X, p.Y);
+						var intFrac = Mathf.Clamp(currentV, IntegrityMin, layerMax) / (float)layerMax;
+						var alpha = Mathf.Clamp(intFrac * texColor.A * opaqueF, 0f, 1f);
+						if (alpha > 1e-6f)
+						{
+							AddHarvestedThumbnailOverlayPixel(gk, p.X, p.Y, alpha);
+							if (!harvestedPixelsByKey.TryGetValue(gk, out var px))
+							{
+								px = new Godot.Collections.Array();
+								harvestedPixelsByKey[gk] = px;
+							}
+
+							px.Add(new Godot.Collections.Dictionary
+							{
+								["X"] = p.X,
+								["Y"] = p.Y,
+								["Alpha"] = alpha,
+							});
+						}
+					}
+				}
+			}
+
+			SetLayerIntegrity(p.X, p.Y, layer, IntegrityMin);
+			SyncPixel(p.X, p.Y);
+		}
+
 		var payloads = new Godot.Collections.Array();
 		var totalAwarded = 0;
 		foreach (var kv in mergedByKey)
@@ -442,6 +490,10 @@ public partial class DestructiblePixelSheet : Sprite2D
 				["ShapeKey"] = kv.Key,
 				["Points"] = pts,
 			};
+			if (harvestedPixelsByKey.TryGetValue(kv.Key, out var px) && px.Count > 0)
+			{
+				d["HarvestedPixels"] = px;
+			}
 			payloads.Add(d);
 		}
 
@@ -450,10 +502,9 @@ public partial class DestructiblePixelSheet : Sprite2D
 			EmitSignal(SignalName.PointsAwarded, totalAwarded, payloads);
 		}
 
-		foreach (var p in islandCells)
+		foreach (var gk in poppedShapeKeys)
 		{
-			SetLayerIntegrity(p.X, p.Y, layer, IntegrityMin);
-			SyncPixel(p.X, p.Y);
+			MarkOrganThumbnailDirty(gk);
 		}
 
 		if (islandCells.Count > 0)
@@ -851,6 +902,7 @@ public partial class DestructiblePixelSheet : Sprite2D
 					_shapeDamageLostByKey.TryGetValue(gk, out var prevLost);
 					_shapeDamageLostByKey[gk] = prevLost + integrityLost;
 					damageChanged = true;
+					MarkOrganThumbnailDirty(gk);
 				}
 			}
 
@@ -913,8 +965,125 @@ public partial class DestructiblePixelSheet : Sprite2D
 		return count;
 	}
 
+	private void ClearLayerThumbnailSourceCache()
+	{
+		if (_layerThumbnailSourceImages is null)
+		{
+			return;
+		}
+
+		foreach (var img in _layerThumbnailSourceImages)
+		{
+			img?.Dispose();
+		}
+
+		_layerThumbnailSourceImages = null;
+	}
+
+	private Image? GetOrCreateLayerThumbnailSource(int layer)
+	{
+		_layerThumbnailSourceImages ??= new Image?[_resolvedLayerCount];
+		if (_layerThumbnailSourceImages[layer] != null)
+		{
+			return _layerThumbnailSourceImages[layer];
+		}
+
+		var tex = layer < LayerTextures.Length ? LayerTextures[layer] : null;
+		var img = tex != null ? CreateSizedImageCopy(tex) : null;
+		_layerThumbnailSourceImages[layer] = img;
+		return img;
+	}
+
+	private void MarkOrganThumbnailDirty(int globalShapeKey)
+	{
+		_organThumbnailDirtyKeys.Add(globalShapeKey);
+	}
+
+	private void AddHarvestedThumbnailOverlayPixel(int globalShapeKey, int x, int y, float alpha)
+	{
+		if (alpha <= 1e-6f)
+		{
+			return;
+		}
+
+		if (!_harvestedThumbnailOverlayByShapeKey.TryGetValue(globalShapeKey, out var byPixel))
+		{
+			byPixel = new Dictionary<int, float>();
+			_harvestedThumbnailOverlayByShapeKey[globalShapeKey] = byPixel;
+		}
+
+		var pIndex = y * SheetSize.X + x;
+		byPixel[pIndex] = Mathf.Clamp(alpha, 0f, 1f);
+	}
+
+	public void ComposeHarvestedThumbnailOverlay(int globalShapeKey, Image target, int minX, int minY, int bw, int bh)
+	{
+		if (target.GetWidth() != bw || target.GetHeight() != bh)
+		{
+			return;
+		}
+
+		var layer = globalShapeKey / ShapeKeyLayerStride;
+		if ((uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return;
+		}
+
+		if (!_harvestedThumbnailOverlayByShapeKey.TryGetValue(globalShapeKey, out var byPixel) || byPixel.Count == 0)
+		{
+			return;
+		}
+
+		var layerImg = GetOrCreateLayerThumbnailSource(layer);
+		if (layerImg is null)
+		{
+			return;
+		}
+
+		foreach (var kv in byPixel)
+		{
+			var pIndex = kv.Key;
+			var sx = pIndex % SheetSize.X;
+			var sy = pIndex / SheetSize.X;
+			var ix = sx - minX;
+			var iy = sy - minY;
+			if ((uint)ix >= (uint)bw || (uint)iy >= (uint)bh)
+			{
+				continue;
+			}
+
+			var texColor = layerImg.GetPixel(sx, sy);
+			var alpha = Mathf.Clamp(kv.Value, 0f, 1f);
+			if (alpha <= 1e-6f)
+			{
+				continue;
+			}
+
+			target.SetPixel(ix, iy, new Color(texColor.R, texColor.G, texColor.B, alpha));
+		}
+	}
+
+	public void ClearOrganThumbnailDirtyKeys()
+	{
+		_organThumbnailDirtyKeys.Clear();
+	}
+
+	/// <summary>Copies dirty organ keys for UI thumbnail refresh and clears the set.</summary>
+	public Godot.Collections.Array ConsumeOrganThumbnailDirtyKeys()
+	{
+		var arr = new Godot.Collections.Array();
+		foreach (var k in _organThumbnailDirtyKeys)
+		{
+			arr.Add(k);
+		}
+
+		_organThumbnailDirtyKeys.Clear();
+		return arr;
+	}
+
 	private void BuildLayerRasterColors()
 	{
+		ClearLayerThumbnailSourceCache();
 		var stride = SheetSize.X * SheetSize.Y;
 		_layerBaseColors = new Color[stride * _resolvedLayerCount];
 		var fallback = new Color(0.85f, 0.85f, 0.85f, 1f);
@@ -1114,6 +1283,146 @@ public partial class DestructiblePixelSheet : Sprite2D
 		}
 
 		return arr;
+	}
+
+	/// <summary>Sheet-space bbox of organ mask pixels for this global key. False if invalid or empty.</summary>
+	public bool TryGetOrganThumbnailExtents(int globalShapeKey, out int minX, out int minY, out int width, out int height)
+	{
+		minX = 0;
+		minY = 0;
+		width = 0;
+		height = 0;
+		var layer = globalShapeKey / ShapeKeyLayerStride;
+		var localId = globalShapeKey % ShapeKeyLayerStride;
+		if (localId <= 0 || (uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return false;
+		}
+
+		var w = SheetSize.X;
+		var h = SheetSize.Y;
+		var bx0 = w;
+		var by0 = h;
+		var bx1 = -1;
+		var by1 = -1;
+		for (var sy = 0; sy < h; sy++)
+		{
+			for (var sx = 0; sx < w; sx++)
+			{
+				if (!IsShapeCell(sx, sy, layer))
+				{
+					continue;
+				}
+
+				if (_organLocalId[LayeredIndex(sx, sy, layer)] != localId)
+				{
+					continue;
+				}
+
+				if (sx < bx0)
+				{
+					bx0 = sx;
+				}
+
+				if (sy < by0)
+				{
+					by0 = sy;
+				}
+
+				if (sx > bx1)
+				{
+					bx1 = sx;
+				}
+
+				if (sy > by1)
+				{
+					by1 = sy;
+				}
+			}
+		}
+
+		if (bx1 < 0)
+		{
+			return false;
+		}
+
+		minX = bx0;
+		minY = by0;
+		width = bx1 - bx0 + 1;
+		height = by1 - by0 + 1;
+		return true;
+	}
+
+	/// <summary>
+	/// Writes organ thumbnail into an existing Image (layer texture RGB at sheet coords; alpha from integrity).
+	/// Does not use SyncPixel or the composited sheet. target size must match TryGetOrganThumbnailExtents.
+	/// </summary>
+	public void WriteOrganThumbnailToImage(int globalShapeKey, Image target)
+	{
+		if (!TryGetOrganThumbnailExtents(globalShapeKey, out var minX, out var minY, out var bw, out var bh))
+		{
+			return;
+		}
+
+		WriteOrganThumbnailToImage(globalShapeKey, target, minX, minY, bw, bh);
+	}
+
+	/// <summary>Same as <see cref="WriteOrganThumbnailToImage(int, Image)"/> but skips a full-sheet bbox scan when extents are already known.</summary>
+	public void WriteOrganThumbnailToImage(int globalShapeKey, Image target, int minX, int minY, int bw, int bh)
+	{
+		if (target.GetWidth() != bw || target.GetHeight() != bh)
+		{
+			return;
+		}
+
+		var layer = globalShapeKey / ShapeKeyLayerStride;
+		var localId = globalShapeKey % ShapeKeyLayerStride;
+		if (localId <= 0 || (uint)layer >= (uint)_resolvedLayerCount)
+		{
+			return;
+		}
+
+		var layerImg = GetOrCreateLayerThumbnailSource(layer);
+		if (layerImg is null)
+		{
+			target.Fill(Colors.Transparent);
+			return;
+		}
+
+		var layerMax = GetLayerMaxHealth(layer);
+		var opaqueF = GetLayerVisualOpaqueFactor(layer);
+		for (var iy = 0; iy < bh; iy++)
+		{
+			for (var ix = 0; ix < bw; ix++)
+			{
+				var sx = minX + ix;
+				var sy = minY + iy;
+				if (!IsShapeCell(sx, sy, layer) || _organLocalId[LayeredIndex(sx, sy, layer)] != localId)
+				{
+					target.SetPixel(ix, iy, Colors.Transparent);
+					continue;
+				}
+
+				var v = GetLayerIntegrity(sx, sy, layer);
+				if (v <= IntegrityMin)
+				{
+					target.SetPixel(ix, iy, Colors.Transparent);
+					continue;
+				}
+
+				var texColor = layerImg.GetPixel(sx, sy);
+				var intFrac = Mathf.Clamp(v, IntegrityMin, layerMax) / (float)layerMax;
+				var alpha = Mathf.Clamp(intFrac * texColor.A * opaqueF, 0f, 1f);
+				if (alpha <= 1e-6f)
+				{
+					target.SetPixel(ix, iy, Colors.Transparent);
+				}
+				else
+				{
+					target.SetPixel(ix, iy, new Color(texColor.R, texColor.G, texColor.B, alpha));
+				}
+			}
+		}
 	}
 
 	private int LayeredIndex(int x, int y, int layer)
